@@ -21,6 +21,7 @@ set(HEADER_FILES
 		include/chiaki/video.h
 		include/chiaki/videoreceiver.h
 		include/chiaki/frameprocessor.h
+		include/chiaki/packetstats.h
 		include/chiaki/seqnum.h
 		include/chiaki/discovery.h
 		include/chiaki/congestioncontrol.h
@@ -59,6 +60,7 @@ set(SOURCE_FILES
 		src/audioreceiver.c
 		src/videoreceiver.c
 		src/frameprocessor.c
+		src/packetstats.c
 		src/discovery.c
 		src/congestioncontrol.c
 		src/stoppipe.c
@@ -72,6 +74,12 @@ set(SOURCE_FILES
 		src/fec
 		src/regist.c
 		src/opusdecoder.c)
+
+if(CHIAKI_ENABLE_PI_DECODER)
+	list(APPEND HEADER_FILES include/chiaki/pidecoder.h)
+	list(APPEND SOURCE_FILES src/pidecoder.c)
+endif()
+set(CHIAKI_LIB_ENABLE_PI_DECODER "${CHIAKI_ENABLE_PI_DECODER}")
 
 add_subdirectory(protobuf)
 set_source_files_properties(${CHIAKI_LIB_PROTO_SOURCE_FILES} ${CHIAKI_LIB_PROTO_HEADER_FILES} PROPERTIES GENERATED TRUE)
@@ -118,6 +126,10 @@ endif()
 
 target_link_libraries(chiaki-lib Nanopb::nanopb)
 target_link_libraries(chiaki-lib Jerasure::Jerasure)
+
+if(CHIAKI_ENABLE_PI_DECODER)
+	target_link_libraries(chiaki-lib ILClient::ILClient)
+endif()
 
 if(CHIAKI_LIB_ENABLE_OPUS)
 	target_link_libraries(chiaki-lib ${Opus_LIBRARIES})

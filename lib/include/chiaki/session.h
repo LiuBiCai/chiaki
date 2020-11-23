@@ -12,8 +12,6 @@
 #include "takion.h"
 #include "ecdh.h"
 #include "audio.h"
-#include "audioreceiver.h"
-#include "videoreceiver.h"
 #include "controller.h"
 #include "stoppipe.h"
 
@@ -76,6 +74,7 @@ typedef struct chiaki_connect_info_t
 	char regist_key[CHIAKI_SESSION_AUTH_SIZE]; // must be completely filled (pad with \0)
 	uint8_t morning[0x10];
 	ChiakiConnectVideoProfile video_profile;
+	bool enable_keyboard;
 } ChiakiConnectInfo;
 
 
@@ -157,6 +156,7 @@ typedef struct chiaki_session_t
 		uint8_t morning[CHIAKI_RPCRYPT_KEY_SIZE];
 		uint8_t did[CHIAKI_RP_DID_SIZE];
 		ChiakiConnectVideoProfile video_profile;
+		bool enable_keyboard;
 	} connect_info;
 
 	ChiakiTarget target;
@@ -197,8 +197,6 @@ typedef struct chiaki_session_t
 	ChiakiLog *log;
 
 	ChiakiStreamConnection stream_connection;
-	ChiakiAudioReceiver *audio_receiver;
-	ChiakiVideoReceiver *video_receiver;
 
 	ChiakiControllerState controller_state;
 } ChiakiSession;

@@ -18,7 +18,9 @@ StreamSessionConnectInfo::StreamSessionConnectInfo(Settings *settings, QString h
 	: settings(settings)
 {
 	key_map = settings->GetControllerMappingForDecoding();
+	decoder = settings->GetDecoder();
 	hw_decode_engine = settings->GetHardwareDecodeEngine();
+	audio_out_device = settings->GetAudioOutDevice();
 	log_level_mask = settings->GetLogLevelMask();
 	log_file = CreateLogFilename();
 	video_profile = settings->GetVideoProfile();
@@ -27,6 +29,7 @@ StreamSessionConnectInfo::StreamSessionConnectInfo(Settings *settings, QString h
 	this->morning = morning;
 	audio_buffer_size = settings->GetAudioBufferSize();
 	this->fullscreen = fullscreen;
+	this->enable_keyboard = false; // TODO: from settings
 }
 
 static void AudioSettingsCb(uint32_t channels, uint32_t rate, void *user);
@@ -41,11 +44,43 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 	: QObject(parent),
 	log(this, connect_info.log_level_mask, connect_info.log_file),
 	controller(nullptr),
-	video_decoder(connect_info.hw_decode_engine, log.GetChiakiLog()),
+	video_decoder(nullptr),
+#if CHIAKI_LIB_ENABLE_PI_DECODER
+	pi_decoder(nullptr),
+#endif
 	audio_output(nullptr),
 	audio_io(nullptr)
 {
 	connected = false;
+
+#if CHIAKI_LIB_ENABLE_PI_DECODER
+	if(connect_info.decoder == Decoder::Pi)
+	{
+		pi_decoder = CHIAKI_NEW(ChiakiPiDecoder);
+		if(chiaki_pi_decoder_init(pi_decoder, log.GetChiakiLog()) != CHIAKI_ERR_SUCCESS)
+			throw ChiakiException("Failed to initialize Raspberry Pi Decoder");
+	}
+	else
+	{
+#endif
+		video_decoder = new VideoDecoder(connect_info.hw_decode_engine, log.GetChiakiLog());
+#if CHIAKI_LIB_ENABLE_PI_DECODER
+	}
+#endif
+
+	audio_out_device_info = QAudioDeviceInfo::defaultOutputDevice();
+	if(!connect_info.audio_out_device.isEmpty())
+	{
+		for(QAudioDeviceInfo di : QAudioDeviceInfo::availableDevices(QAudio::AudioOutput))
+		{
+			if(di.deviceName() == connect_info.audio_out_device)
+			{
+				audio_out_device_info = di;
+				break;
+			}
+		}
+	}
+
 	chiaki_opus_decoder_init(&opus_decoder, log.GetChiakiLog());
 	audio_buffer_size = connect_info.audio_buffer_size;
 
@@ -74,7 +109,17 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 	chiaki_opus_decoder_get_sink(&opus_decoder, &audio_sink);
 	chiaki_session_set_audio_sink(&session, &audio_sink);
 
-	chiaki_session_set_video_sample_cb(&session, VideoSampleCb, this);
+#if CHIAKI_LIB_ENABLE_PI_DECODER
+	if(pi_decoder)
+		chiaki_session_set_video_sample_cb(&session, chiaki_pi_decoder_video_sample_cb, pi_decoder);
+	else
+	{
+#endif
+		chiaki_session_set_video_sample_cb(&session, VideoSampleCb, this);
+#if CHIAKI_LIB_ENABLE_PI_DECODER
+	}
+#endif
+
 	chiaki_session_set_event_cb(&session, EventCb, this);
 
 #if CHIAKI_GUI_ENABLE_SDL_GAMECONTROLLER
@@ -106,6 +151,14 @@ StreamSession::~StreamSession()
 #if CHIAKI_GUI_ENABLE_SETSU
 	setsu_free(setsu);
 #endif
+#if CHIAKI_LIB_ENABLE_PI_DECODER
+	if(pi_decoder)
+	{
+		chiaki_pi_decoder_fini(pi_decoder);
+		free(pi_decoder);
+	}
+#endif
+	delete video_decoder;
 }
 
 void StreamSession::Start()
@@ -257,7 +310,7 @@ void StreamSession::InitAudio(unsigned int channels, unsigned int rate)
 	audio_format.setCodec("audio/pcm");
 	audio_format.setSampleType(QAudioFormat::SignedInt);
 
-	QAudioDeviceInfo audio_device_info(QAudioDeviceInfo::defaultOutputDevice());
+	QAudioDeviceInfo audio_device_info = audio_out_device_info;
 	if(!audio_device_info.isFormatSupported(audio_format))
 	{
 		CHIAKI_LOGE(log.GetChiakiLog(), "Audio Format with %u channels @ %u Hz not supported by Audio Device %s",
@@ -266,7 +319,7 @@ void StreamSession::InitAudio(unsigned int channels, unsigned int rate)
 		return;
 	}
 
-	audio_output = new QAudioOutput(audio_format, this);
+	audio_output = new QAudioOutput(audio_device_info, audio_format, this);
 	audio_output->setBufferSize(audio_buffer_size);
 	audio_io = audio_output->start();
 
@@ -284,7 +337,7 @@ void StreamSession::PushAudioFrame(int16_t *buf, size_t samples_count)
 
 void StreamSession::PushVideoSample(uint8_t *buf, size_t buf_size)
 {
-	video_decoder.PushFrame(buf, buf_size);
+	video_decoder->PushFrame(buf, buf_size);
 }
 
 void StreamSession::Event(ChiakiEvent *event)
