@@ -19,6 +19,10 @@
 #include <QMap>
 #include <QCheckBox>
 #include <QLineEdit>
+#include <QtConcurrent>
+#include <QFutureWatcher>
+
+#include <chiaki/config.h>
 
 const char * const about_string =
 	"<h1>Chiaki</h1> by thestr4ng3r, version " CHIAKI_VERSION
@@ -149,6 +153,36 @@ SettingsDialog::SettingsDialog(Settings *settings, QWidget *parent) : QDialog(pa
 	audio_buffer_size_edit->setPlaceholderText(tr("Default (%1)").arg(settings->GetAudioBufferSizeDefault()));
 	connect(audio_buffer_size_edit, &QLineEdit::textEdited, this, &SettingsDialog::AudioBufferSizeEdited);
 
+	audio_device_combo_box = new QComboBox(this);
+	audio_device_combo_box->addItem(tr("Auto"));
+	auto current_audio_device = settings->GetAudioOutDevice();
+	if(!current_audio_device.isEmpty())
+	{
+		// temporarily add the selected device before async fetching is done
+		audio_device_combo_box->addItem(current_audio_device, current_audio_device);
+		audio_device_combo_box->setCurrentIndex(1);
+	}
+	connect(audio_device_combo_box, QOverload<int>::of(&QComboBox::activated), this, [this](){
+		this->settings->SetAudioOutDevice(audio_device_combo_box->currentData().toString());
+	});
+
+	// do this async because it's slow, assuming availableDevices() is thread-safe
+	auto audio_devices_future = QtConcurrent::run([]() {
+		return QAudioDeviceInfo::availableDevices(QAudio::AudioOutput);
+	});
+	auto audio_devices_future_watcher = new QFutureWatcher<QList<QAudioDeviceInfo>>(this);
+	connect(audio_devices_future_watcher, &QFutureWatcher<QList<QAudioDeviceInfo>>::finished, this, [this, audio_devices_future_watcher, settings]() {
+		auto available_devices = audio_devices_future_watcher->result();
+		while(audio_device_combo_box->count() > 1) // remove all but "Auto"
+			audio_device_combo_box->removeItem(1);
+		for (QAudioDeviceInfo di : available_devices)
+			audio_device_combo_box->addItem(di.deviceName(), di.deviceName());
+		int audio_out_device_index = audio_device_combo_box->findData(settings->GetAudioOutDevice());
+		audio_device_combo_box->setCurrentIndex(audio_out_device_index < 0 ? 0 : audio_out_device_index);
+	});
+	audio_devices_future_watcher->setFuture(audio_devices_future);
+	general_layout->addRow(tr("Audio Output Device:"), audio_device_combo_box);
+
 	// Decode Settings
 
 	auto decode_settings = new QGroupBox(tr("Decode Settings"));
@@ -156,6 +190,18 @@ SettingsDialog::SettingsDialog(Settings *settings, QWidget *parent) : QDialog(pa
 
 	auto decode_settings_layout = new QFormLayout();
 	decode_settings->setLayout(decode_settings_layout);
+
+#if CHIAKI_LIB_ENABLE_PI_DECODER
+	pi_decoder_check_box = new QCheckBox(this);
+	pi_decoder_check_box->setChecked(settings->GetDecoder() == Decoder::Pi);
+	connect(pi_decoder_check_box, &QCheckBox::toggled, this, [this](bool checked) {
+		this->settings->SetDecoder(checked ? Decoder::Pi : Decoder::Ffmpeg);
+		UpdateHardwareDecodeEngineComboBox();
+	});
+	decode_settings_layout->addRow(tr("Use Raspberry Pi Decoder:"), pi_decoder_check_box);
+#else
+	pi_decoder_check_box = nullptr;
+#endif
 
 	hardware_decode_combo_box = new QComboBox(this);
 	static const QList<QPair<HardwareDecodeEngine, const char *>> hardware_decode_engines = {
@@ -173,6 +219,7 @@ SettingsDialog::SettingsDialog(Settings *settings, QWidget *parent) : QDialog(pa
 	}
 	connect(hardware_decode_combo_box, SIGNAL(currentIndexChanged(int)), this, SLOT(HardwareDecodeEngineSelected()));
 	decode_settings_layout->addRow(tr("Hardware decode method:"), hardware_decode_combo_box);
+	UpdateHardwareDecodeEngineComboBox();
 
 	// Registered Consoles
 
@@ -276,9 +323,19 @@ void SettingsDialog::AudioBufferSizeEdited()
 	settings->SetAudioBufferSize(audio_buffer_size_edit->text().toUInt());
 }
 
+void SettingsDialog::AudioOutputSelected()
+{
+	settings->SetAudioOutDevice(audio_device_combo_box->currentText());
+}
+
 void SettingsDialog::HardwareDecodeEngineSelected()
 {
 	settings->SetHardwareDecodeEngine((HardwareDecodeEngine)hardware_decode_combo_box->currentData().toInt());
+}
+
+void SettingsDialog::UpdateHardwareDecodeEngineComboBox()
+{
+	hardware_decode_combo_box->setEnabled(settings->GetDecoder() == Decoder::Ffmpeg);
 }
 
 void SettingsDialog::UpdateBitratePlaceholder()

@@ -9,6 +9,7 @@
 #include "videodecoder.h"
 
 #include <QSettings>
+#include <QAudioDeviceInfo>
 
 enum class ControllerButtonExt
 {
@@ -28,6 +29,12 @@ enum class DisconnectAction
 	AlwaysNothing,
 	AlwaysSleep,
 	Ask
+};
+
+enum class Decoder
+{
+	Ffmpeg,
+	Pi
 };
 
 class Settings : public QObject
@@ -69,6 +76,9 @@ class Settings : public QObject
 		unsigned int GetBitrate() const;
 		void SetBitrate(unsigned int bitrate);
 
+		Decoder GetDecoder() const;
+		void SetDecoder(Decoder decoder);
+
 		HardwareDecodeEngine GetHardwareDecodeEngine() const;
 		void SetHardwareDecodeEngine(HardwareDecodeEngine enabled);
 
@@ -84,6 +94,9 @@ class Settings : public QObject
 		 */
 		unsigned int GetAudioBufferSize() const;
 		void SetAudioBufferSize(unsigned int size);
+		
+		QString GetAudioOutDevice() const;
+		void SetAudioOutDevice(QString device_name);
 
 		ChiakiConnectVideoProfile GetVideoProfile();
 

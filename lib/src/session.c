@@ -215,6 +215,7 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_session_init(ChiakiSession *session, Chiaki
 	memcpy(session->connect_info.did + sizeof(session->connect_info.did) - sizeof(did_suffix), did_suffix, sizeof(did_suffix));
 
 	session->connect_info.video_profile = connect_info->video_profile;
+	session->connect_info.enable_keyboard = connect_info->enable_keyboard;
 
 	return CHIAKI_ERR_SUCCESS;
 error_stop_pipe:
@@ -483,20 +484,6 @@ ctrl_failed:
 		QUIT(quit_ctrl);
 	}
 
-	session->audio_receiver = chiaki_audio_receiver_new(session);
-	if(!session->audio_receiver)
-	{
-		CHIAKI_LOGE(session->log, "Session failed to initialize Audio Receiver");
-		QUIT(quit_ecdh);
-	}
-
-	session->video_receiver = chiaki_video_receiver_new(session);
-	if(!session->video_receiver)
-	{
-		CHIAKI_LOGE(session->log, "Session failed to initialize Video Receiver");
-		QUIT(quit_audio_receiver);
-	}
-
 	chiaki_mutex_unlock(&session->state_mutex);
 	err = chiaki_stream_connection_run(&session->stream_connection);
 	chiaki_mutex_lock(&session->state_mutex);
@@ -517,16 +504,7 @@ ctrl_failed:
 		session->quit_reason = CHIAKI_QUIT_REASON_STOPPED;
 	}
 
-	chiaki_video_receiver_free(session->video_receiver);
-	session->video_receiver = NULL;
-
 	chiaki_mutex_unlock(&session->state_mutex);
-
-quit_audio_receiver:
-	chiaki_audio_receiver_free(session->audio_receiver);
-	session->audio_receiver = NULL;
-
-quit_ecdh:
 	chiaki_ecdh_fini(&session->ecdh);
 
 quit_ctrl:
